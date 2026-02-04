@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BOSS Sprite Previewer</title>
+    <style>
+        body {
+            background-color: #111; color: #ddd; font-family: monospace;
+            margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+        }
+        /* 預覽區 */
+        #stage {
+            flex: 1; display: flex; align-items: flex-end; justify-content: center;
+            background: radial-gradient(circle, #222 0%, #000 100%);
+            padding-bottom: 50px; border-bottom: 2px solid #500; position: relative;
+        }
+        /* 圖片本體 (像素風格設定) */
+        #boss-img {
+            image-rendering: pixelated; transition: width 0.2s, filter 0.1s;
+            width: 150px; /* 初始大小 */
+        }
+        /* 資訊文字 */
+        #info { position: absolute; top: 10px; left: 10px; font-size: 12px; color: #666; }
+        
+        /* 控制區 */
+        #controls {
+            background: #222; padding: 15px; border-top: 1px solid #444;
+            display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+        }
+        button, label {
+            padding: 8px 16px; background: #333; border: 1px solid #555; color: #fff;
+            cursor: pointer; font-size: 14px; border-radius: 4px;
+        }
+        button:hover, label:hover { background: #444; border-color: #888; }
+        button:active { transform: scale(0.95); }
+        input[type="file"] { display: none; }
+
+        /* 特效動畫 */
+        .shake { animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both; }
+        .flash { filter: brightness(10) sepia(1) hue-rotate(-50deg) saturate(5) !important; }
+        
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-2px, 0, 0); }
+            20%, 80% { transform: translate3d(4px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
+            40%, 60% { transform: translate3d(8px, 0, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="stage">
+        <div id="info">Z-Depth: <span id="z-val">0.2</span></div>
+        <img id="boss-img" src="boss_idle.png" alt="BOSS" onerror="this.style.opacity=0.3">
+    </div>
+
+    <div id="controls">
+        <!-- 檔案載入 -->
+        <label>📂 載入待機圖 <input type="file" onchange="loadImg(this, 'idle')"></label>
+        <label>📂 載入攻擊圖 <input type="file" onchange="loadImg(this, 'attack')"></label>
+        
+        <span style="border-left: 1px solid #555; margin: 0 5px;"></span>
+
+        <!-- 動作測試 -->
+        <button onclick="changeZ(0.1)">⏫ 前進</button>
+        <button onclick="changeZ(-0.1)">⏬ 後退</button>
+        <button onclick="toggleState()" id="btn-state">切換: 待機</button>
+        <button onclick="triggerDamage()" style="color:#f88; border-color:#844">💥 受傷測試</button>
+    </div>
+
+    <script>
+        const imgEl = document.getElementById('boss-img');
+        const zEl = document.getElementById('z-val');
+        const btnState = document.getElementById('btn-state');
+        
+        // 預設路徑 (對應 GitHub Page 檔案結構)
+        let srcIdle = "boss_idle.png";
+        let srcAttack = "boss_attack.png";
+        
+        let z = 0.2;
+        let isIdle = true;
+
+        // 載入本地圖片 (供快速測試用)
+        function loadImg(input, type) {
+            if (input.files && input.files[0]) {
+                const url = URL.createObjectURL(input.files[0]);
+                if (type === 'idle') srcIdle = url;
+                if (type === 'attack') srcAttack = url;
+                updateView();
+            }
+        }
+
+        // 模擬 Z 軸移動 (改變大小)
+        function changeZ(delta) {
+            z = Math.max(0.05, Math.min(1.5, z + delta));
+            // 模擬遊戲內的透視公式: size = base + (z^2 * scale)
+            const width = 50 + (z * z * 400); 
+            imgEl.style.width = width + "px";
+            zEl.innerText = z.toFixed(2);
+        }
+
+        // 切換狀態
+        function toggleState() {
+            isIdle = !isIdle;
+            btnState.innerText = isIdle ? "切換: 待機 (Idle)" : "切換: 攻擊 (Attack)";
+            updateView();
+        }
+
+        // 更新圖片來源
+        function updateView() {
+            imgEl.src = isIdle ? srcIdle : srcAttack;
+            imgEl.style.opacity = 1;
+        }
+
+        // 受傷特效
+        function triggerDamage() {
+            // 1. 瞬間切換到攻擊狀態 (模擬生氣)
+            const oldState = isIdle;
+            isIdle = false; 
+            updateView();
+
+            // 2. 震動 + 閃光
+            imgEl.classList.add('shake', 'flash');
+
+            // 3. 恢復
+            setTimeout(() => {
+                imgEl.classList.remove('shake', 'flash');
+                // 如果原本是待機，0.5秒後變回待機
+                if (oldState) {
+                    setTimeout(() => { isIdle = true; updateView(); }, 500);
+                }
+            }, 300);
+        }
+
+        // 初始化
+        changeZ(0); 
+    </script>
+</body>
+</html>
