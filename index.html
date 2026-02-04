@@ -3,176 +3,388 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BOSS Sprite Previewer (Multi-Frame)</title>
+    <title>BOSS Hybrid Animator (Sprite + Procedural)</title>
     <style>
         body {
-            background-color: #111; color: #ddd; font-family: monospace;
+            background-color: #111; color: #ddd; font-family: 'Segoe UI', monospace;
             margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden;
         }
-        /* 預覽區 */
+        
+        /* --- 預覽舞台區 --- */
         #stage {
             flex: 1; display: flex; align-items: flex-end; justify-content: center;
-            background: radial-gradient(circle, #222 0%, #000 100%);
-            padding-bottom: 50px; border-bottom: 2px solid #500; position: relative;
+            background: radial-gradient(circle at center bottom, #333 0%, #000 80%);
+            padding-bottom: 80px; border-bottom: 2px solid #500; position: relative;
+            overflow: hidden;
         }
-        /* 圖片本體 (像素風格設定) */
+
+        /* 網格背景 (參考用) */
+        #stage::before {
+            content: " "; position: absolute; top:0; left:0; width:100%; height:100%;
+            background-image: linear-gradient(#222 1px, transparent 1px), linear-gradient(90deg, #222 1px, transparent 1px);
+            background-size: 50px 50px; opacity: 0.3; pointer-events: none;
+        }
+
+        /* 圖片容器 - 用於處理震動特效 */
+        #boss-wrapper {
+            position: relative;
+            display: flex; justify-content: center; align-items: flex-end;
+        }
+
+        /* 圖片本體 - 負責縮放與呼吸 */
         #boss-img {
-            image-rendering: pixelated; transition: width 0.1s, filter 0.1s;
-            width: 150px; /* 初始大小 */
+            image-rendering: pixelated; 
+            transform-origin: bottom center; /* 呼吸從底部開始 */
+            width: 150px; 
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.8));
+            transition: filter 0.1s;
         }
-        /* 資訊文字 */
-        #info { position: absolute; top: 10px; left: 10px; font-size: 12px; color: #666; }
-        
-        /* 控制區 */
+
+        /* 資訊 HUD */
+        #hud { 
+            position: absolute; top: 15px; left: 15px; 
+            font-family: monospace; font-size: 14px; 
+            background: rgba(0,0,0,0.7); padding: 10px; border: 1px solid #444; border-radius: 4px;
+            pointer-events: none;
+        }
+        .status-idle { color: #8f8; }
+        .status-ready { color: #fa0; }
+        .status-attack { color: #f44; font-weight: bold; text-shadow: 0 0 10px red; }
+
+        /* --- 控制面板區 --- */
         #controls {
-            background: #222; padding: 15px; border-top: 1px solid #444;
-            display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+            background: #181818; padding: 10px 20px; border-top: 1px solid #444;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px;
+            box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+            z-index: 10;
         }
-        button, label {
-            padding: 8px 16px; background: #333; border: 1px solid #555; color: #fff;
-            cursor: pointer; font-size: 14px; border-radius: 4px;
+
+        .panel-group {
+            border: 1px solid #333; padding: 10px; border-radius: 6px; background: #222;
         }
-        button:hover, label:hover { background: #444; border-color: #888; }
-        button:active { transform: scale(0.95); }
+        .panel-title { font-size: 12px; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; border-bottom: 1px solid #444; padding-bottom: 4px; }
+
+        .btn-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 5px; }
+        
+        button, label, input[type="number"] {
+            font-family: inherit; font-size: 12px;
+        }
+        
+        button {
+            padding: 8px 12px; background: #333; border: 1px solid #555; color: #fff;
+            cursor: pointer; border-radius: 4px; transition: 0.2s;
+            flex: 1;
+        }
+        button:hover:not(:disabled) { background: #555; border-color: #999; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.primary { background: #522; border-color: #844; }
+        button.primary:hover:not(:disabled) { background: #722; border-color: #a66; }
+
+        label {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #2a2a2a; padding: 5px 10px; border-radius: 4px; margin-bottom: 4px; cursor: pointer; border: 1px dashed #444;
+        }
+        label:hover { border-color: #666; background: #333; }
         input[type="file"] { display: none; }
 
-        /* 特效動畫 */
-        .shake { animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both; }
-        .flash { filter: brightness(10) sepia(1) hue-rotate(-50deg) saturate(5) !important; }
-        
-        @keyframes shake {
-            10%, 90% { transform: translate3d(-2px, 0, 0); }
-            20%, 80% { transform: translate3d(4px, 0, 0); }
-            30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
-            40%, 60% { transform: translate3d(8px, 0, 0); }
+        .param-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+        .param-row span { font-size: 12px; color: #aaa; }
+        input[type="number"] {
+            width: 60px; background: #111; border: 1px solid #444; color: #0f0; padding: 4px; text-align: right;
         }
+
+        /* CSS 特效類 */
+        .flash { filter: brightness(5) sepia(1) saturate(5) hue-rotate(-50deg) drop-shadow(0 0 20px red) !important; }
+        
     </style>
 </head>
 <body>
 
     <div id="stage">
-        <div id="info">Z-Depth: <span id="z-val">0.2</span> | Frame: <span id="f-val">1</span></div>
-        <img id="boss-img" src="" alt="BOSS (Please Upload)" onerror="this.style.opacity=0.3">
+        <div id="hud">
+            <div>STATE: <span id="status-text" class="status-idle">IDLE</span></div>
+            <div>Z-Depth: <span id="z-val">0.20</span></div>
+            <div>Active Img: <span id="img-src-debug">None</span></div>
+        </div>
+
+        <div id="boss-wrapper">
+            <img id="boss-img" src="" alt="請在下方載入圖片" onerror="this.style.opacity=0.2">
+        </div>
     </div>
 
     <div id="controls">
-        <!-- 檔案載入 -->
-        <label>📂 待機圖1 (Idle 1) <input type="file" onchange="loadImg(this, 'idle', 0)"></label>
-        <label>📂 待機圖2 (Idle 2) <input type="file" onchange="loadImg(this, 'idle', 1)"></label>
         
-        <span style="border-left: 1px solid #555; margin: 0 5px;"></span>
+        <!-- 1. 圖片資源管理 -->
+        <div class="panel-group">
+            <div class="panel-title">1. Assets (圖片資源)</div>
+            <label>📂 待機動作 A (Idle 1) <input type="file" onchange="loadImg(this, 'idle', 0)"></label>
+            <label>📂 待機動作 B (Idle 2) <input type="file" onchange="loadImg(this, 'idle', 1)"></label>
+            <label>📂 攻擊預備 (Ready) <input type="file" onchange="loadImg(this, 'ready', 0)"></label>
+            <label>📂 攻擊瞬間 (Attack) <input type="file" onchange="loadImg(this, 'attack', 0)"></label>
+        </div>
 
-        <label>📂 攻擊圖 (Attack) <input type="file" onchange="loadImg(this, 'attack', 0)"></label>
-        
-        <span style="border-left: 1px solid #555; margin: 0 5px;"></span>
+        <!-- 2. 參數調校 -->
+        <div class="panel-group">
+            <div class="panel-title">2. Parameters (參數調校)</div>
+            
+            <div class="param-row">
+                <span>待機循環 (ms)</span>
+                <input type="number" id="inp-idle-spd" value="500" step="50" onchange="updateParams()">
+            </div>
+            <div class="param-row">
+                <span>蓄力時間 (Ready ms)</span>
+                <input type="number" id="inp-ready-time" value="600" step="50" onchange="updateParams()">
+            </div>
+            <div class="param-row">
+                <span>攻擊判定 (Attack ms)</span>
+                <input type="number" id="inp-attack-time" value="300" step="50" onchange="updateParams()">
+            </div>
+            <div class="param-row" style="border-top: 1px solid #333; padding-top:5px; margin-top:5px;">
+                <span>呼吸幅度 (0~0.1)</span>
+                <input type="number" id="inp-breath-amp" value="0.03" step="0.01" onchange="updateParams()">
+            </div>
+            <div class="param-row">
+                <span>走路晃動 (px)</span>
+                <input type="number" id="inp-wobble-amp" value="5" step="1" onchange="updateParams()">
+            </div>
+        </div>
 
-        <!-- 動作測試 -->
-        <button onclick="changeZ(0.1)">⏫ 前進</button>
-        <button onclick="changeZ(-0.1)">⏬ 後退</button>
-        <button onclick="toggleState()" id="btn-state">切換: 待機</button>
-        <button onclick="triggerDamage()" style="color:#f88; border-color:#844">💥 受傷測試</button>
+        <!-- 3. 動作測試 -->
+        <div class="panel-group">
+            <div class="panel-title">3. Actions (動作測試)</div>
+            <div class="btn-row">
+                <button onclick="changeZ(0.1)">⏫ 前進 (Near)</button>
+                <button onclick="changeZ(-0.1)">⏬ 後退 (Far)</button>
+            </div>
+            <div class="btn-row">
+                <button id="btn-attack" class="primary" onclick="startAttackSequence()">⚔️ 執行攻擊 (Attack)</button>
+            </div>
+            <div class="btn-row">
+                <button onclick="triggerDamage()" style="border-color: #844; color:#f88;">💥 受傷測試 (Damage)</button>
+            </div>
+        </div>
+
     </div>
 
     <script>
+        // DOM 元素
         const imgEl = document.getElementById('boss-img');
+        const wrapperEl = document.getElementById('boss-wrapper');
         const zEl = document.getElementById('z-val');
-        const fEl = document.getElementById('f-val');
-        const btnState = document.getElementById('btn-state');
-        
-        // 圖片資源庫
-        const assets = {
-            idle: [null, null], // 支援 2 張待機圖
-            attack: [null]      // 1 張攻擊圖通常就夠了 (或者也可以擴充)
-        };
-        
-        let z = 0.2;
-        let isIdle = true;
-        let frameIndex = 0;
-        let animationInterval = null;
+        const statusText = document.getElementById('status-text');
+        const debugSrc = document.getElementById('img-src-debug');
+        const btnAttack = document.getElementById('btn-attack');
 
-        // 載入圖片
+        // 圖片庫
+        const assets = {
+            idle: [null, null],
+            ready: [null],
+            attack: [null]
+        };
+
+        // 核心參數 (會從 UI 讀取)
+        let config = {
+            idleLoopSpeed: 500,
+            readyDuration: 600,
+            attackDuration: 300,
+            breatheAmp: 0.03,    // 呼吸縮放比例
+            breatheSpeed: 0.003, // 呼吸速度係數
+            wobbleAmp: 5,        // 走路上下晃動像素
+            wobbleSpeed: 0.008   // 走路速度係數
+        };
+
+        // 狀態變數
+        let z = 0.2;
+        let currentState = 'IDLE'; // IDLE, READY, ATTACK
+        let idleFrameIndex = 0;
+        let idleInterval = null;
+        let motionFrameId = null;
+        let damageShake = 0; // 受傷震動強度
+
+        // --- 1. 資源載入 ---
         function loadImg(input, type, index) {
             if (input.files && input.files[0]) {
                 const url = URL.createObjectURL(input.files[0]);
                 assets[type][index] = url;
                 
-                // 如果是第一張圖，立刻更新顯示
-                if (imgEl.getAttribute('src') === "" || imgEl.getAttribute('src') === null) {
-                    updateView();
-                    startAnimation();
-                }
+                // UX: 載入後自動嘗試顯示
+                if (type === 'idle' && currentState === 'IDLE') updateSprite();
+                
+                // 若這是第一張圖，啟動循環
+                if (!idleInterval) startSystem();
             }
         }
 
-        // 動畫循環邏輯
-        function startAnimation() {
-            if (animationInterval) clearInterval(animationInterval);
-            
-            // 每 500ms 切換一次 (模擬走路節奏)
-            animationInterval = setInterval(() => {
-                if (isIdle) {
-                    // 在待機圖 1 和 2 之間切換
-                    frameIndex = (frameIndex + 1) % 2; 
-                    updateView();
-                }
-            }, 500);
+        // --- 2. 參數更新 ---
+        function updateParams() {
+            config.idleLoopSpeed = parseInt(document.getElementById('inp-idle-spd').value) || 500;
+            config.readyDuration = parseInt(document.getElementById('inp-ready-time').value) || 600;
+            config.attackDuration = parseInt(document.getElementById('inp-attack-time').value) || 300;
+            config.breatheAmp = parseFloat(document.getElementById('inp-breath-amp').value) || 0.03;
+            config.wobbleAmp = parseFloat(document.getElementById('inp-wobble-amp').value) || 5;
+
+            // 重啟 Idle Loop 以套用新速度
+            if (idleInterval) {
+                clearInterval(idleInterval);
+                startIdleLoop();
+            }
         }
 
-        // 更新圖片顯示
-        function updateView() {
-            let src = "";
-            
-            if (isIdle) {
-                // 如果缺圖，自動 fallback 到第一張
-                src = assets.idle[frameIndex] || assets.idle[0];
-            } else {
-                src = assets.attack[0] || assets.idle[0]; // 如果沒攻擊圖，用待機圖
+        // --- 3. 核心循環系統 (Hybrid Engine) ---
+        function startSystem() {
+            startIdleLoop();        // 負責切換圖片 (Sprite Animation)
+            startProceduralMotion(); // 負責數學計算動態 (Procedural Animation)
+        }
+
+        // A. 圖片切換循環
+        function startIdleLoop() {
+            if (idleInterval) clearInterval(idleInterval);
+            idleInterval = setInterval(() => {
+                if (currentState === 'IDLE') {
+                    idleFrameIndex = (idleFrameIndex + 1) % 2;
+                    updateSprite();
+                }
+            }, config.idleLoopSpeed);
+        }
+
+        // B. 程式化動態循環 (無段變速呼吸與晃動)
+        function startProceduralMotion() {
+            if (motionFrameId) cancelAnimationFrame(motionFrameId);
+
+            function loop() {
+                const now = Date.now();
+                
+                // 1. 計算呼吸 (Scale Y)
+                // 攻擊時呼吸急促 (Speed * 3, Amp * 0.5)
+                const isAggro = currentState !== 'IDLE';
+                const bSpeed = isAggro ? config.breatheSpeed * 4 : config.breatheSpeed;
+                const bAmp = isAggro ? config.breatheAmp * 0.5 : config.breatheAmp;
+                
+                const breatheScale = 1 + Math.sin(now * bSpeed) * bAmp;
+
+                // 2. 計算走路晃動 (Translate Y)
+                // 攻擊時通常站定不動，所以晃動歸零
+                let wobbleY = 0;
+                if (currentState === 'IDLE') {
+                    wobbleY = Math.abs(Math.sin(now * config.wobbleSpeed)) * config.wobbleAmp;
+                }
+
+                // 3. 計算受傷震動 (Shake)
+                let shakeX = 0;
+                let shakeY = 0;
+                if (damageShake > 0) {
+                    shakeX = (Math.random() - 0.5) * damageShake;
+                    shakeY = (Math.random() - 0.5) * damageShake;
+                    damageShake *= 0.9; // 衰減
+                    if (damageShake < 0.5) damageShake = 0;
+                }
+
+                // 4. 攻擊時的額外效果 (Impact Scale)
+                const impactScale = (currentState === 'ATTACK') ? 1.15 : 1.0;
+
+                // 5. 綜合應用到 CSS
+                // 呼吸與衝擊應用在 Scale，走路與震動應用在 Translate
+                const finalScale = breatheScale * impactScale;
+                const finalY = -wobbleY + shakeY;
+                const finalX = shakeX;
+
+                imgEl.style.transform = `translate(${finalX}px, ${finalY}px) scale(${finalScale})`;
+
+                motionFrameId = requestAnimationFrame(loop);
+            }
+            loop();
+        }
+
+        // --- 4. 顯示更新邏輯 ---
+        function updateSprite() {
+            let src = null;
+            let debugTag = "";
+
+            if (currentState === 'IDLE') {
+                src = assets.idle[idleFrameIndex] || assets.idle[0];
+                debugTag = `Idle[${idleFrameIndex}]`;
+                statusText.className = 'status-idle';
+            } else if (currentState === 'READY') {
+                src = assets.ready[0] || assets.idle[0]; // 缺圖就用 Idle 頂替
+                debugTag = `Ready`;
+                statusText.className = 'status-ready';
+            } else if (currentState === 'ATTACK') {
+                src = assets.attack[0] || assets.idle[0];
+                debugTag = `Attack`;
+                statusText.className = 'status-attack';
             }
 
+            statusText.innerText = currentState;
+            
             if (src) {
-                imgEl.src = src;
-                imgEl.style.opacity = 1;
-                fEl.innerText = frameIndex + 1;
+                // 只有當圖片路徑改變時才設定，節省瀏覽器重繪效能
+                const currentSrc = imgEl.getAttribute('src');
+                if (currentSrc !== src) {
+                    imgEl.src = src;
+                    imgEl.style.opacity = 1;
+                }
+                debugSrc.innerText = debugTag;
             } else {
-                imgEl.alt = "請上傳圖片";
+                debugSrc.innerText = "No Image";
             }
         }
 
-        // 模擬 Z 軸移動
+        // --- 5. 互動功能 ---
+
+        // 觸發攻擊序列
+        function startAttackSequence() {
+            if (currentState !== 'IDLE') return; // 防止重複觸發
+
+            // 鎖定按鈕
+            btnAttack.disabled = true;
+            btnAttack.innerHTML = "⚠️ 蓄力中...";
+
+            // Phase 1: Ready
+            currentState = 'READY';
+            updateSprite();
+
+            setTimeout(() => {
+                // Phase 2: Attack
+                currentState = 'ATTACK';
+                btnAttack.innerHTML = "⚔️ 攻擊!";
+                updateSprite();
+                
+                // 攻擊瞬間可以加一點震動
+                damageShake = 10; 
+
+                setTimeout(() => {
+                    // Phase 3: Recovery
+                    currentState = 'IDLE';
+                    btnAttack.disabled = false;
+                    btnAttack.innerHTML = "⚔️ 執行攻擊 (Attack)";
+                    updateSprite();
+                }, config.attackDuration);
+
+            }, config.readyDuration);
+        }
+
+        // 觸發受傷
+        function triggerDamage() {
+            imgEl.classList.add('flash');
+            damageShake = 20; // 設定震動強度，交給 Loop 去處理
+            
+            setTimeout(() => {
+                imgEl.classList.remove('flash');
+            }, 150);
+        }
+
+        // 調整距離 (大小)
         function changeZ(delta) {
             z = Math.max(0.05, Math.min(1.5, z + delta));
+            // 距離公式：距離越近(Z越小?) 這裡反過來 Z越大越近
             const width = 50 + (z * z * 400); 
             imgEl.style.width = width + "px";
             zEl.innerText = z.toFixed(2);
         }
 
-        // 切換狀態
-        function toggleState() {
-            isIdle = !isIdle;
-            btnState.innerText = isIdle ? "切換: 待機 (Idle)" : "切換: 攻擊 (Attack)";
-            // 攻擊時通常不播走路動畫，或是播攻擊動畫 (這裡簡化為單張)
-            updateView();
-        }
-
-        // 受傷特效
-        function triggerDamage() {
-            const oldState = isIdle;
-            isIdle = false; // 瞬間切換攻擊姿態
-            updateView();
-
-            imgEl.classList.add('shake', 'flash');
-
-            setTimeout(() => {
-                imgEl.classList.remove('shake', 'flash');
-                if (oldState) {
-                    setTimeout(() => { isIdle = true; updateView(); }, 500);
-                }
-            }, 300);
-        }
-
         // 初始化
-        changeZ(0); 
-        startAnimation();
+        changeZ(0);
+        // 若沒有上傳圖片，暫不啟動 Loop，等待上傳
     </script>
 </body>
 </html>
