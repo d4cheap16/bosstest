@@ -50,6 +50,7 @@
         .status-idle { color: #8f8; }
         .status-ready { color: #fa0; }
         .status-attack { color: #f44; font-weight: bold; text-shadow: 0 0 10px red; }
+        .status-damage { color: #f8f; font-weight: bold; text-shadow: 0 0 10px magenta; }
 
         /* --- 控制面板區 --- */
         #controls {
@@ -121,6 +122,7 @@
             <label>📂 待機動作 B (Idle 2) <input type="file" onchange="loadImg(this, 'idle', 1)"></label>
             <label>📂 攻擊預備 (Ready) <input type="file" onchange="loadImg(this, 'ready', 0)"></label>
             <label>📂 攻擊瞬間 (Attack) <input type="file" onchange="loadImg(this, 'attack', 0)"></label>
+            <label style="border-color: #844;">📂 受傷/僵直 (Damage) <input type="file" onchange="loadImg(this, 'damage', 0)"></label>
         </div>
 
         <!-- 2. 參數調校 -->
@@ -139,6 +141,11 @@
                 <span>攻擊判定 (Attack ms)</span>
                 <input type="number" id="inp-attack-time" value="300" step="50" onchange="updateParams()">
             </div>
+            <div class="param-row">
+                <span>受傷硬直 (Damage ms)</span>
+                <input type="number" id="inp-damage-time" value="400" step="50" onchange="updateParams()">
+            </div>
+
             <div class="param-row" style="border-top: 1px solid #333; padding-top:5px; margin-top:5px;">
                 <span>呼吸幅度 (0~0.1)</span>
                 <input type="number" id="inp-breath-amp" value="0.03" step="0.01" onchange="updateParams()">
@@ -179,7 +186,8 @@
         const assets = {
             idle: [null, null],
             ready: [null],
-            attack: [null]
+            attack: [null],
+            damage: [null] // 新增受傷圖片槽位
         };
 
         // 核心參數 (會從 UI 讀取)
@@ -187,6 +195,7 @@
             idleLoopSpeed: 500,
             readyDuration: 600,
             attackDuration: 300,
+            damageDuration: 400, // 新增受傷時間
             breatheAmp: 0.03,    // 呼吸縮放比例
             breatheSpeed: 0.003, // 呼吸速度係數
             wobbleAmp: 5,        // 走路上下晃動像素
@@ -195,11 +204,12 @@
 
         // 狀態變數
         let z = 0.2;
-        let currentState = 'IDLE'; // IDLE, READY, ATTACK
+        let currentState = 'IDLE'; // IDLE, READY, ATTACK, DAMAGE
         let idleFrameIndex = 0;
         let idleInterval = null;
         let motionFrameId = null;
         let damageShake = 0; // 受傷震動強度
+        let actionTimeout = null; // 用來管理攻擊或受傷的計時器，方便隨時中斷
 
         // --- 1. 資源載入 ---
         function loadImg(input, type, index) {
@@ -220,6 +230,7 @@
             config.idleLoopSpeed = parseInt(document.getElementById('inp-idle-spd').value) || 500;
             config.readyDuration = parseInt(document.getElementById('inp-ready-time').value) || 600;
             config.attackDuration = parseInt(document.getElementById('inp-attack-time').value) || 300;
+            config.damageDuration = parseInt(document.getElementById('inp-damage-time').value) || 400;
             config.breatheAmp = parseFloat(document.getElementById('inp-breath-amp').value) || 0.03;
             config.wobbleAmp = parseFloat(document.getElementById('inp-wobble-amp').value) || 5;
 
@@ -255,12 +266,14 @@
                 const now = Date.now();
                 
                 // 1. 計算呼吸 (Scale Y)
-                // 攻擊時呼吸急促 (Speed * 3, Amp * 0.5)
+                // 攻擊或受傷時呼吸改變
                 const isAggro = currentState !== 'IDLE';
                 const bSpeed = isAggro ? config.breatheSpeed * 4 : config.breatheSpeed;
                 const bAmp = isAggro ? config.breatheAmp * 0.5 : config.breatheAmp;
                 
-                const breatheScale = 1 + Math.sin(now * bSpeed) * bAmp;
+                // 受傷時暫停呼吸或變得非常急促，這裡選擇變小
+                let breatheScale = 1 + Math.sin(now * bSpeed) * bAmp;
+                if (currentState === 'DAMAGE') breatheScale = 1.0; 
 
                 // 2. 計算走路晃動 (Translate Y)
                 // 攻擊時通常站定不動，所以晃動歸零
@@ -312,6 +325,10 @@
                 src = assets.attack[0] || assets.idle[0];
                 debugTag = `Attack`;
                 statusText.className = 'status-attack';
+            } else if (currentState === 'DAMAGE') {
+                src = assets.damage[0] || assets.idle[0]; // 缺圖用 Idle
+                debugTag = `Damage`;
+                statusText.className = 'status-damage';
             }
 
             statusText.innerText = currentState;
@@ -343,7 +360,8 @@
             currentState = 'READY';
             updateSprite();
 
-            setTimeout(() => {
+            // 使用全局變數存儲 Timeout，以便受傷時可以中斷
+            actionTimeout = setTimeout(() => {
                 // Phase 2: Attack
                 currentState = 'ATTACK';
                 btnAttack.innerHTML = "⚔️ 攻擊!";
@@ -352,25 +370,46 @@
                 // 攻擊瞬間可以加一點震動
                 damageShake = 10; 
 
-                setTimeout(() => {
-                    // Phase 3: Recovery
-                    currentState = 'IDLE';
-                    btnAttack.disabled = false;
-                    btnAttack.innerHTML = "⚔️ 執行攻擊 (Attack)";
-                    updateSprite();
+                actionTimeout = setTimeout(() => {
+                    resetToIdle();
                 }, config.attackDuration);
 
             }, config.readyDuration);
         }
 
-        // 觸發受傷
+        // 觸發受傷 (中斷任何動作)
         function triggerDamage() {
-            imgEl.classList.add('flash');
-            damageShake = 20; // 設定震動強度，交給 Loop 去處理
+            // 1. 中斷當前計時器 (例如正在蓄力攻擊)
+            if (actionTimeout) clearTimeout(actionTimeout);
             
+            // 2. 設定狀態
+            currentState = 'DAMAGE';
+            updateSprite();
+            
+            // 3. 特效
+            imgEl.classList.add('flash');
+            damageShake = 20; // 強烈震動
+            
+            // 4. 重設按鈕 UI (如果攻擊被中斷)
+            btnAttack.disabled = false;
+            btnAttack.innerHTML = "⚔️ 執行攻擊 (Attack)";
+
+            // 5. 設定回復時間
             setTimeout(() => {
                 imgEl.classList.remove('flash');
             }, 150);
+
+            actionTimeout = setTimeout(() => {
+                resetToIdle();
+            }, config.damageDuration);
+        }
+
+        // 回復到 IDLE 的共用函式
+        function resetToIdle() {
+            currentState = 'IDLE';
+            btnAttack.disabled = false;
+            btnAttack.innerHTML = "⚔️ 執行攻擊 (Attack)";
+            updateSprite();
         }
 
         // 調整距離 (大小)
