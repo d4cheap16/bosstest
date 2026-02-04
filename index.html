@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BOSS Sprite Previewer</title>
+    <title>BOSS Sprite Previewer (Multi-Frame)</title>
     <style>
         body {
             background-color: #111; color: #ddd; font-family: monospace;
@@ -17,7 +17,7 @@
         }
         /* 圖片本體 (像素風格設定) */
         #boss-img {
-            image-rendering: pixelated; transition: width 0.2s, filter 0.1s;
+            image-rendering: pixelated; transition: width 0.1s, filter 0.1s;
             width: 150px; /* 初始大小 */
         }
         /* 資訊文字 */
@@ -51,14 +51,18 @@
 <body>
 
     <div id="stage">
-        <div id="info">Z-Depth: <span id="z-val">0.2</span></div>
-        <img id="boss-img" src="boss_idle.png" alt="BOSS" onerror="this.style.opacity=0.3">
+        <div id="info">Z-Depth: <span id="z-val">0.2</span> | Frame: <span id="f-val">1</span></div>
+        <img id="boss-img" src="" alt="BOSS (Please Upload)" onerror="this.style.opacity=0.3">
     </div>
 
     <div id="controls">
         <!-- 檔案載入 -->
-        <label>📂 載入待機圖 <input type="file" onchange="loadImg(this, 'idle')"></label>
-        <label>📂 載入攻擊圖 <input type="file" onchange="loadImg(this, 'attack')"></label>
+        <label>📂 待機圖1 (Idle 1) <input type="file" onchange="loadImg(this, 'idle', 0)"></label>
+        <label>📂 待機圖2 (Idle 2) <input type="file" onchange="loadImg(this, 'idle', 1)"></label>
+        
+        <span style="border-left: 1px solid #555; margin: 0 5px;"></span>
+
+        <label>📂 攻擊圖 (Attack) <input type="file" onchange="loadImg(this, 'attack', 0)"></label>
         
         <span style="border-left: 1px solid #555; margin: 0 5px;"></span>
 
@@ -72,29 +76,71 @@
     <script>
         const imgEl = document.getElementById('boss-img');
         const zEl = document.getElementById('z-val');
+        const fEl = document.getElementById('f-val');
         const btnState = document.getElementById('btn-state');
         
-        // 預設路徑 (對應 GitHub Page 檔案結構)
-        let srcIdle = "boss_idle.png";
-        let srcAttack = "boss_attack.png";
+        // 圖片資源庫
+        const assets = {
+            idle: [null, null], // 支援 2 張待機圖
+            attack: [null]      // 1 張攻擊圖通常就夠了 (或者也可以擴充)
+        };
         
         let z = 0.2;
         let isIdle = true;
+        let frameIndex = 0;
+        let animationInterval = null;
 
-        // 載入本地圖片 (供快速測試用)
-        function loadImg(input, type) {
+        // 載入圖片
+        function loadImg(input, type, index) {
             if (input.files && input.files[0]) {
                 const url = URL.createObjectURL(input.files[0]);
-                if (type === 'idle') srcIdle = url;
-                if (type === 'attack') srcAttack = url;
-                updateView();
+                assets[type][index] = url;
+                
+                // 如果是第一張圖，立刻更新顯示
+                if (imgEl.getAttribute('src') === "" || imgEl.getAttribute('src') === null) {
+                    updateView();
+                    startAnimation();
+                }
             }
         }
 
-        // 模擬 Z 軸移動 (改變大小)
+        // 動畫循環邏輯
+        function startAnimation() {
+            if (animationInterval) clearInterval(animationInterval);
+            
+            // 每 500ms 切換一次 (模擬走路節奏)
+            animationInterval = setInterval(() => {
+                if (isIdle) {
+                    // 在待機圖 1 和 2 之間切換
+                    frameIndex = (frameIndex + 1) % 2; 
+                    updateView();
+                }
+            }, 500);
+        }
+
+        // 更新圖片顯示
+        function updateView() {
+            let src = "";
+            
+            if (isIdle) {
+                // 如果缺圖，自動 fallback 到第一張
+                src = assets.idle[frameIndex] || assets.idle[0];
+            } else {
+                src = assets.attack[0] || assets.idle[0]; // 如果沒攻擊圖，用待機圖
+            }
+
+            if (src) {
+                imgEl.src = src;
+                imgEl.style.opacity = 1;
+                fEl.innerText = frameIndex + 1;
+            } else {
+                imgEl.alt = "請上傳圖片";
+            }
+        }
+
+        // 模擬 Z 軸移動
         function changeZ(delta) {
             z = Math.max(0.05, Math.min(1.5, z + delta));
-            // 模擬遊戲內的透視公式: size = base + (z^2 * scale)
             const width = 50 + (z * z * 400); 
             imgEl.style.width = width + "px";
             zEl.innerText = z.toFixed(2);
@@ -104,29 +150,20 @@
         function toggleState() {
             isIdle = !isIdle;
             btnState.innerText = isIdle ? "切換: 待機 (Idle)" : "切換: 攻擊 (Attack)";
+            // 攻擊時通常不播走路動畫，或是播攻擊動畫 (這裡簡化為單張)
             updateView();
-        }
-
-        // 更新圖片來源
-        function updateView() {
-            imgEl.src = isIdle ? srcIdle : srcAttack;
-            imgEl.style.opacity = 1;
         }
 
         // 受傷特效
         function triggerDamage() {
-            // 1. 瞬間切換到攻擊狀態 (模擬生氣)
             const oldState = isIdle;
-            isIdle = false; 
+            isIdle = false; // 瞬間切換攻擊姿態
             updateView();
 
-            // 2. 震動 + 閃光
             imgEl.classList.add('shake', 'flash');
 
-            // 3. 恢復
             setTimeout(() => {
                 imgEl.classList.remove('shake', 'flash');
-                // 如果原本是待機，0.5秒後變回待機
                 if (oldState) {
                     setTimeout(() => { isIdle = true; updateView(); }, 500);
                 }
@@ -135,6 +172,7 @@
 
         // 初始化
         changeZ(0); 
+        startAnimation();
     </script>
 </body>
 </html>
